@@ -32,12 +32,13 @@ fn setup(mut commands: Commands) {
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 }
 
-fn spawn_board(mut commands: Commands) {
+fn spawn_board(mut commands: Commands, materials: Res<Materials>) {
     let board = Board { size: 4 };
     let physical_board_size = f32::from(board.size) * TILE_SIZE;
 
     commands
         .spawn_bundle(SpriteBundle {
+            material: materials.board.clone(),
             sprite: Sprite::new(Vec2::new(physical_board_size, physical_board_size)),
             ..Default::default()
         })
