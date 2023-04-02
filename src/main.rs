@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use itertools::Itertools;
 use rand::prelude::*;
-use std::convert::TryFrom;
+use std::{cmp::Ordering, convert::TryFrom};
 
 const TILE_SIZE: f32 = 40.0;
 const TILE_SPACER: f32 = 10.0;
@@ -55,11 +55,12 @@ impl FromWorld for Materials {
         }
     }
 }
-
+#[derive(Debug)]
 struct Points {
     value: u32,
 }
 
+#[derive(Debug)]
 struct Position {
     x: u8,
     y: u8,
@@ -98,6 +99,7 @@ fn main() {
         .add_startup_system_to_stage(StartupStage::PostStartup, spawn_tiles.system())
         .add_system(render_tile_points.system())
         .add_system(board_shift.system())
+        .add_system(render_tiles.system())
         .run();
 }
 
@@ -206,14 +208,57 @@ fn render_tile_points(
     }
 }
 
-fn board_shift(input: Res<Input<KeyCode>>) {
-    let shift_direction = input
+fn board_shift(
+    mut commands: Commands,
+    keyboard_input: Res<Input<KeyCode>>,
+    mut tiles: Query<(Entity, &mut Position, &mut Points)>,
+) {
+    let shift_direction = keyboard_input
         .get_just_pressed()
         .find_map(|key_code| BoardShift::try_from(key_code).ok());
 
     match shift_direction {
         Some(BoardShift::Left) => {
-            dbg!("left");
+            let mut column: u8 = 0;
+
+            let mut it = tiles
+                .iter_mut()
+                .sorted_by(|a, b| match Ord::cmp(&a.1.y, &b.1.y) {
+                    Ordering::Equal => Ord::cmp(&a.1.x, &b.1.x),
+                    ordering => ordering,
+                })
+                .peekable();
+            while let Some(mut tile) = it.next() {
+                tile.1.x = column;
+                match it.peek() {
+                    None => {}
+                    Some(tile_next) => {
+                        if tile.1.y != tile_next.1.y {
+                            // different rows, don't merge
+                            column = 0;
+                        } else if tile.2.value != tile_next.2.value {
+                            // different values, don't merge
+                            column = column + 1;
+                        } else {
+                            // merge
+                            let real_next_tile = it
+                                .next()
+                                .expect("A peeked tile should always exist when we .next here");
+                            tile.2.value = tile.2.value + real_next_tile.2.value;
+
+                            commands.entity(real_next_tile.0).despawn_recursive();
+
+                            if let Some(future) = it.peek() {
+                                if tile.1.y != future.1.y {
+                                    column = 0;
+                                } else {
+                                    column = column + 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         Some(BoardShift::Right) => {
             dbg!("right");
@@ -225,5 +270,18 @@ fn board_shift(input: Res<Input<KeyCode>>) {
             dbg!("down");
         }
         None => (),
+    }
+}
+
+fn render_tiles(
+    mut tiles: Query<(&mut Transform, &Position, Changed<Position>)>,
+    query_board: Query<&Board>,
+) {
+    let board = query_board.single().expect("expect there to be a board");
+    for (mut transform, pos, pos_changed) in tiles.iter_mut() {
+        if pos_changed {
+            transform.translation.x = board.cell_position_to_physical(pos.x);
+            transform.translation.y = board.cell_position_to_physical(pos.y);
+        }
     }
 }
